@@ -1,0 +1,132 @@
+name: Advanced Cache Strategies
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  multi-level-cache:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    # レベル1: Node.jsキャッシュ
+    - name: Cache Node.js
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.npm
+          ~/.nvm
+        key: ${{ runner.os }}-nodejs-${{ hashFiles('.nvmrc') }}
+        restore-keys: |
+          ${{ runner.os }}-nodejs-
+    
+    # レベル2: 依存関係キャッシュ
+    - name: Cache dependencies
+      id: cache-deps
+      uses: actions/cache@v4
+      with:
+        path: node_modules
+        key: ${{ runner.os }}-deps-${{ hashFiles('package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-deps-
+    
+    # レベル3: ビルドキャッシュ
+    - name: Cache build output
+      uses: actions/cache@v4
+      with:
+        path: |
+          .next/cache
+          dist/
+          build/
+        key: ${{ runner.os }}-build-${{ hashFiles('**/*.js', '**/*.json', '!node_modules/**') }}
+        restore-keys: |
+          ${{ runner.os }}-build-
+    
+    - name: Install dependencies
+      if: steps.cache-deps.outputs.cache-hit != 'true'
+      run: npm ci
+    
+    - name: Show cache status
+      run: |
+        echo "Dependency cache hit: ${{ steps.cache-deps.outputs.cache-hit }}"
+        echo "Node modules size: $(du -sh node_modules 2>/dev/null || echo 'Not found')"
+        echo "Available disk space: $(df -h . | tail -1)"
+    
+    - name: Build with cache info
+      run: |
+        echo "Starting build process..."
+        npm run build
+        echo "Build completed"
+        
+        # キャッシュ統計の生成
+        echo "## Cache Statistics" > cache-stats.md
+        echo "- Dependency cache: ${{ steps.cache-deps.outputs.cache-hit }}" >> cache-stats.md
+        echo "- Build time: $(date)" >> cache-stats.md
+        echo "- Node modules size: $(du -sh node_modules 2>/dev/null || echo 'N/A')" >> cache-stats.md
+
+  conditional-cache:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Determine cache strategy
+      id: cache-strategy
+      run: |
+        # ブランチに基づいてキャッシュ戦略を決定
+        if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          echo "strategy=aggressive" >> $GITHUB_OUTPUT
+          echo "cache-prefix=prod" >> $GITHUB_OUTPUT
+        else
+          echo "strategy=conservative" >> $GITHUB_OUTPUT
+          echo "cache-prefix=dev" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Conditional cache (Aggressive)
+      if: steps.cache-strategy.outputs.strategy == 'aggressive'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.npm
+          node_modules
+          dist/
+          .cache/
+        key: ${{ steps.cache-strategy.outputs.cache-prefix }}-${{ runner.os }}-full-${{ hashFiles('**/*.json', '**/*.js') }}
+        restore-keys: |
+          ${{ steps.cache-strategy.outputs.cache-prefix }}-${{ runner.os }}-full-
+          ${{ steps.cache-strategy.outputs.cache-prefix }}-${{ runner.os }}-
+    
+    - name: Conditional cache (Conservative)
+      if: steps.cache-strategy.outputs.strategy == 'conservative'
+      uses: actions/cache@v4
+      with:
+        path: ~/.npm
+        key: ${{ steps.cache-strategy.outputs.cache-prefix }}-${{ runner.os }}-npm-${{ hashFiles('package-lock.json') }}
+        restore-keys: |
+          ${{ steps.cache-strategy.outputs.cache-prefix }}-${{ runner.os }}-npm-
+    
+    - name: Install and build
+      run: |
+        echo "Using cache strategy: ${{ steps.cache-strategy.outputs.strategy }}"
+        npm install
+        npm run build
+    
+    - name: Cache cleanup
+      run: |
+        echo "Cleaning up old cache entries..."
+        # 実際の環境では、古いキャッシュエントリの削除ロジックを実装
+        echo "Cache cleanup completed"

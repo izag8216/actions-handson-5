@@ -1,0 +1,159 @@
+name: Cache Demonstration
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-without-cache:
+    name: Build without Cache
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Record start time
+      run: echo "BUILD_START=$(date +%s)" >> $GITHUB_ENV
+    
+    - name: Install dependencies (no cache)
+      run: |
+        echo "Installing dependencies without cache..."
+        npm install
+    
+    - name: Run tests
+      run: npm test
+    
+    - name: Build project
+      run: npm run build
+    
+    - name: Calculate build time
+      run: |
+        BUILD_END=$(date +%s)
+        BUILD_TIME=$((BUILD_END - BUILD_START))
+        echo "Build time without cache: ${BUILD_TIME} seconds"
+        echo "BUILD_TIME_NO_CACHE=${BUILD_TIME}" >> $GITHUB_ENV
+    
+    - name: Upload build time artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-time-no-cache
+        path: |
+          package-lock.json
+          dist/
+
+  build-with-cache:
+    name: Build with Cache
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Record start time
+      run: echo "BUILD_START=$(date +%s)" >> $GITHUB_ENV
+    
+    - name: Cache node modules
+      id: cache-npm
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.npm
+          node_modules
+        key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+    
+    - name: Install dependencies (with cache)
+      run: |
+        if [[ "${{ steps.cache-npm.outputs.cache-hit }}" == "true" ]]; then
+          echo "Cache hit! Dependencies restored from cache."
+        else
+          echo "Cache miss. Installing dependencies..."
+        fi
+        npm install
+    
+    - name: Cache build artifacts
+      id: cache-build
+      uses: actions/cache@v4
+      with:
+        path: dist/
+        key: ${{ runner.os }}-build-${{ hashFiles('webpack.config.js', 'index.js', 'package.json') }}
+    
+    - name: Run tests
+      run: npm test
+    
+    - name: Build project
+      if: steps.cache-build.outputs.cache-hit != 'true'
+      run: |
+        echo "Building project (cache miss)..."
+        npm run build
+    
+    - name: Skip build
+      if: steps.cache-build.outputs.cache-hit == 'true'
+      run: echo "Build skipped (cache hit)!"
+    
+    - name: Calculate build time
+      run: |
+        BUILD_END=$(date +%s)
+        BUILD_TIME=$((BUILD_END - BUILD_START))
+        echo "Build time with cache: ${BUILD_TIME} seconds"
+        echo "BUILD_TIME_WITH_CACHE=${BUILD_TIME}" >> $GITHUB_ENV
+    
+    - name: Upload build time artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-time-with-cache
+        path: |
+          package-lock.json
+          dist/
+
+  cache-comparison:
+    name: Compare Cache Performance
+    needs: [build-without-cache, build-with-cache]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
+    
+    - name: Generate performance report
+      run: |
+        echo "# Cache Performance Report" > performance-report.md
+        echo "" >> performance-report.md
+        echo "Generated at: $(date)" >> performance-report.md
+        echo "" >> performance-report.md
+        echo "## Cache Benefits" >> performance-report.md
+        echo "" >> performance-report.md
+        echo "- **Node modules caching**: Reduces npm install time" >> performance-report.md
+        echo "- **Build artifact caching**: Skips rebuild when source unchanged" >> performance-report.md
+        echo "- **Dependency caching**: Improves CI/CD pipeline efficiency" >> performance-report.md
+        echo "" >> performance-report.md
+        echo "## Cache Strategy" >> performance-report.md
+        echo "" >> performance-report.md
+        echo "1. Use specific cache keys based on file hashes" >> performance-report.md
+        echo "2. Implement fallback restore-keys for partial matches" >> performance-report.md
+        echo "3. Cache multiple paths when beneficial" >> performance-report.md
+        echo "4. Consider cache invalidation strategies" >> performance-report.md
+        
+        cat performance-report.md
+    
+    - name: Upload performance report
+      uses: actions/upload-artifact@v4
+      with:
+        name: performance-report
+        path: performance-report.md
